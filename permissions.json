@@ -1,0 +1,57 @@
+[
+  {
+    "address": "0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82",
+    "clearance": 2,
+    "executionOptions": 0,
+    "functions": [
+      {
+        "selector": "0x095ea7b3",
+        "wildcarded": true
+      }
+    ]
+  },
+  {
+    "address": "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4",
+    "clearance": 2,
+    "executionOptions": 1,
+    "functions": [
+      {
+        "selector": "0x04e45aaf",
+        "wildcarded": true
+      }
+    ]
+  },
+  {
+    "address": "0x38869bf66a61cF6bDB996A6aE40D5853Fd43B526",
+    "clearance": 2,
+    "executionOptions": 2,
+    "functions": [
+      {
+        "selector": "0x8d80ff0a",
+        "wildcarded": true
+      }
+    ]
+  },
+  {
+    "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "clearance": 2,
+    "executionOptions": 0,
+    "functions": [
+      {
+        "selector": "0x095ea7b3",
+        "wildcarded": true
+      }
+    ]
+  },
+  {
+    "address": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+    "clearance": 2,
+    "executionOptions": 0,
+    "functions": [
+      {
+        "selector": "0x095ea7b3",
+        "wildcarded": true
+      }
+    ]
+  }
+]

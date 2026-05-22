@@ -1,0 +1,5 @@
+{
+  "display_name": "BNB-TA-Swap-MA",
+  "description": "EMA(5/10) crossover dashboard for CAKE/BNB swaps on PancakeSwap V3 (BSC).",
+  "icon": "📈"
+}
