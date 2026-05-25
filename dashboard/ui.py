@@ -1,4 +1,4 @@
-"""Dashboard UI for the BNB-TA-Swap-MA strategy."""
+"""Custom Streamlit dashboard for the BNB-TA-Swap-MA strategy."""
 
 from __future__ import annotations
 
@@ -9,47 +9,10 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from almanak.framework.dashboard.templates import (
-    TADashboardConfig,
-    prepare_ta_session_state,
-    render_ta_dashboard,
-)
-
 
 STRATEGY_TITLE = "BNB-TA-Swap-MA Dashboard"
 TRADE_PAGE_SIZE = 500
 TRADE_MAX_PAGES = 40
-
-
-def _ema_signal_message(session_state: dict[str, Any]) -> str:
-    prev_relation = str(session_state.get("prev_relation", "unknown")).lower()
-    current_side = str(session_state.get("current_side", "BNB"))
-
-    if prev_relation == "above":
-        return f"Bullish EMA regime (fast EMA > slow EMA). Current side: {current_side}."
-    if prev_relation == "below":
-        return f"Bearish EMA regime (fast EMA < slow EMA). Current side: {current_side}."
-    if prev_relation == "equal":
-        return f"Neutral EMA regime (fast EMA == slow EMA). Current side: {current_side}."
-    return "Waiting for first confirmed EMA relation."
-
-
-def _build_dashboard_config(strategy_config: dict[str, Any]) -> TADashboardConfig:
-    fast_period = int(strategy_config.get("ema_fast_period", 5))
-    slow_period = int(strategy_config.get("ema_slow_period", 10))
-
-    return TADashboardConfig(
-        indicator_name="EMA Crossover",
-        indicator_period=fast_period,
-        secondary_periods=[slow_period],
-        signal_type="momentum",
-        value_format="{:.4f}",
-        custom_signal_fn=_ema_signal_message,
-        chain=str(strategy_config.get("chain", "bsc")),
-        protocol=str(strategy_config.get("protocol", "pancakeswap_v3")),
-        base_token=str(strategy_config.get("base_token", "CAKE")),
-        quote_token=str(strategy_config.get("quote_token", "BNB")),
-    )
 
 
 def _to_float(value: Any) -> float:
@@ -63,6 +26,31 @@ def _to_float(value: Any) -> float:
         return float(Decimal(str(value)))
     except (InvalidOperation, ValueError, TypeError):
         return 0.0
+
+
+def _render_overview(strategy_config: dict[str, Any], session_state: dict[str, Any]) -> None:
+    chain = str(strategy_config.get("chain", "bsc"))
+    protocol = str(strategy_config.get("protocol", "pancakeswap_v3"))
+    base = str(strategy_config.get("base_token", "CAKE"))
+    quote = str(strategy_config.get("quote_token", "BNB"))
+    signal = str(strategy_config.get("signal_token", base))
+    fast = int(strategy_config.get("ema_fast_period", 5))
+    slow = int(strategy_config.get("ema_slow_period", 10))
+
+    prev_relation = str(session_state.get("prev_relation", "unknown")).upper()
+    current_side = str(session_state.get("current_side", quote))
+
+    col_a, col_b, col_c = st.columns(3)
+    col_a.metric("Chain", chain.upper())
+    col_b.metric("Protocol", protocol)
+    col_c.metric("Pair", f"{base}/{quote}")
+
+    col_d, col_e, col_f = st.columns(3)
+    col_d.metric("Signal Token", signal)
+    col_e.metric("EMA Window", f"{fast}/{slow}")
+    col_f.metric("Current Side", current_side)
+
+    st.caption(f"Previous relation: {prev_relation}")
 
 
 def _fetch_all_trade_rows(api_client: Any) -> tuple[list[Any], bool]:
@@ -85,9 +73,11 @@ def _fetch_all_trade_rows(api_client: Any) -> tuple[list[Any], bool]:
         batch = list(getattr(response, "rows", []) or [])
         if not batch:
             break
+
         rows.extend(batch)
         if not getattr(response, "has_more", False):
             break
+
         timestamps = [r.timestamp for r in batch if getattr(r, "timestamp", None) is not None]
         if not timestamps:
             truncated = True
@@ -105,76 +95,37 @@ def _fetch_all_trade_rows(api_client: Any) -> tuple[list[Any], bool]:
         if row_id:
             seen.add(row_id)
         unique_rows.append(row)
+
     return unique_rows, truncated
 
 
-def _render_positions_history(api_client: Any) -> None:
-    st.subheader("All Position Events")
+def _positions_dataframe(api_client: Any) -> pd.DataFrame:
     events = api_client.get_position_events()
     if not events:
-        st.info("No position events recorded yet.")
-        return
+        return pd.DataFrame()
 
-    events_df = pd.DataFrame(events)
-    events_df["timestamp"] = pd.to_datetime(events_df.get("timestamp"), errors="coerce", utc=True)
-    events_df = events_df.dropna(subset=["timestamp"]).sort_values("timestamp")
+    frame = pd.DataFrame(events)
+    frame["timestamp"] = pd.to_datetime(frame.get("timestamp"), errors="coerce", utc=True)
+    frame = frame.dropna(subset=["timestamp"]).sort_values("timestamp")
 
-    if events_df.empty:
-        st.info("Position events are present but missing valid timestamps.")
-        return
+    if frame.empty:
+        return frame
 
-    events_df["event_type"] = events_df.get("event_type", "").fillna("UNKNOWN")
-    events_df["position_id"] = events_df.get("position_id", "").fillna("")
-    events_df["value_usd"] = events_df.get("value_usd", "0").map(_to_float)
-    events_df["delta"] = events_df["event_type"].map({"OPEN": 1, "CLOSE": -1}).fillna(0).astype(int)
-    events_df["active_positions"] = events_df["delta"].cumsum().clip(lower=0)
+    frame["event_type"] = frame.get("event_type", "").fillna("UNKNOWN")
+    frame["position_id"] = frame.get("position_id", "").fillna("")
+    frame["value_usd"] = frame.get("value_usd", "0").map(_to_float)
+    frame["delta"] = frame["event_type"].map({"OPEN": 1, "CLOSE": -1}).fillna(0).astype(int)
+    frame["active_positions"] = frame["delta"].cumsum().clip(lower=0)
 
-    total_positions = int(events_df["position_id"].replace("", pd.NA).dropna().nunique())
-    col_a, col_b, col_c = st.columns(3)
-    col_a.metric("Events", len(events_df))
-    col_b.metric("Unique Positions", total_positions)
-    col_c.metric("Open Positions (timeline)", int(events_df["active_positions"].iloc[-1]))
-
-    st.markdown("**Active positions over time**")
-    st.line_chart(events_df.set_index("timestamp")[["active_positions"]], use_container_width=True)
-
-    daily_event_counts = (
-        events_df.set_index("timestamp")
-        .groupby("event_type")
-        .resample("1D")
-        .size()
-        .unstack("event_type", fill_value=0)
-    )
-    if not daily_event_counts.empty:
-        st.markdown("**Position events per day**")
-        st.bar_chart(daily_event_counts, use_container_width=True)
-
-    table_columns = [
-        "timestamp",
-        "position_id",
-        "position_type",
-        "event_type",
-        "chain",
-        "protocol",
-        "token0",
-        "token1",
-        "amount0",
-        "amount1",
-        "value_usd",
-        "tx_hash",
-    ]
-    available_columns = [col for col in table_columns if col in events_df.columns]
-    st.dataframe(events_df[available_columns], hide_index=True, use_container_width=True)
+    return frame
 
 
-def _render_transactions_history(api_client: Any) -> None:
-    st.subheader("All Transactions")
+def _transactions_dataframe(api_client: Any) -> tuple[pd.DataFrame, bool]:
     rows, truncated = _fetch_all_trade_rows(api_client)
     if not rows:
-        st.info("No transaction history recorded yet.")
-        return
+        return pd.DataFrame(), truncated
 
-    tx_df = pd.DataFrame(
+    frame = pd.DataFrame(
         [
             {
                 "timestamp": getattr(row, "timestamp", None),
@@ -197,38 +148,88 @@ def _render_transactions_history(api_client: Any) -> None:
         ]
     )
 
-    tx_df["timestamp"] = pd.to_datetime(tx_df["timestamp"], errors="coerce", utc=True)
-    tx_df = tx_df.dropna(subset=["timestamp"]).sort_values("timestamp")
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce", utc=True)
+    frame = frame.dropna(subset=["timestamp"]).sort_values("timestamp")
+    if frame.empty:
+        return frame, truncated
 
-    if tx_df.empty:
-        st.info("Transactions are present but missing valid timestamps.")
+    frame["notional_usd"] = frame[["amount_in_usd", "amount_out_usd"]].max(axis=1)
+    frame["cumulative_notional_usd"] = frame["notional_usd"].cumsum()
+    frame["cumulative_gas_usd"] = frame["gas_usd"].cumsum()
+
+    return frame, truncated
+
+
+def _render_positions(frame: pd.DataFrame) -> None:
+    if frame.empty:
+        st.info("No position events recorded yet.")
         return
 
-    tx_df["notional_usd"] = tx_df[["amount_in_usd", "amount_out_usd"]].max(axis=1)
-    tx_df["cumulative_notional_usd"] = tx_df["notional_usd"].cumsum()
-    tx_df["cumulative_gas_usd"] = tx_df["gas_usd"].cumsum()
+    unique_positions = int(frame["position_id"].replace("", pd.NA).dropna().nunique())
 
     col_a, col_b, col_c = st.columns(3)
-    col_a.metric("Transactions", len(tx_df))
-    col_b.metric("Total Notional (USD)", f"{tx_df['notional_usd'].sum():,.2f}")
-    col_c.metric("Total Gas (USD)", f"{tx_df['gas_usd'].sum():,.2f}")
+    col_a.metric("Events", len(frame))
+    col_b.metric("Unique Positions", unique_positions)
+    col_c.metric("Open Positions", int(frame["active_positions"].iloc[-1]))
 
-    st.markdown("**Cumulative transaction notional and gas**")
+    st.markdown("**Active positions over time**")
+    st.line_chart(frame.set_index("timestamp")[["active_positions"]], use_container_width=True)
+
+    per_day = (
+        frame.set_index("timestamp")
+        .groupby("event_type")
+        .resample("1D")
+        .size()
+        .unstack("event_type", fill_value=0)
+    )
+    if not per_day.empty:
+        st.markdown("**Position events per day**")
+        st.bar_chart(per_day, use_container_width=True)
+
+    preferred_columns = [
+        "timestamp",
+        "position_id",
+        "position_type",
+        "event_type",
+        "chain",
+        "protocol",
+        "token0",
+        "token1",
+        "amount0",
+        "amount1",
+        "value_usd",
+        "tx_hash",
+    ]
+    columns = [name for name in preferred_columns if name in frame.columns]
+    st.dataframe(frame[columns], hide_index=True, use_container_width=True)
+
+
+def _render_transactions(frame: pd.DataFrame, truncated: bool) -> None:
+    if frame.empty:
+        st.info("No transaction history recorded yet.")
+        return
+
+    col_a, col_b, col_c = st.columns(3)
+    col_a.metric("Transactions", len(frame))
+    col_b.metric("Total Notional (USD)", f"{frame['notional_usd'].sum():,.2f}")
+    col_c.metric("Total Gas (USD)", f"{frame['gas_usd'].sum():,.2f}")
+
+    st.markdown("**Cumulative notional and gas**")
     st.line_chart(
-        tx_df.set_index("timestamp")[["cumulative_notional_usd", "cumulative_gas_usd"]],
+        frame.set_index("timestamp")[["cumulative_notional_usd", "cumulative_gas_usd"]],
         use_container_width=True,
     )
 
-    tx_counts = tx_df.set_index("timestamp").resample("1D").size().to_frame("transactions")
-    if not tx_counts.empty:
+    per_day = frame.set_index("timestamp").resample("1D").size().to_frame("transactions")
+    if not per_day.empty:
         st.markdown("**Transactions per day**")
-        st.bar_chart(tx_counts, use_container_width=True)
+        st.bar_chart(per_day, use_container_width=True)
 
     if truncated:
-        st.warning("Transaction history reached dashboard pagination limits. Showing the newest available rows.")
+        st.warning("Reached pagination limits. Showing newest available transactions.")
 
     st.dataframe(
-        tx_df[
+        frame[
             [
                 "timestamp",
                 "cycle_id",
@@ -252,28 +253,21 @@ def _render_transactions_history(api_client: Any) -> None:
     )
 
 
-def _render_positions_and_transactions_history(api_client: Any) -> None:
-    st.divider()
-    st.header("Positions & Transactions History")
-    _render_positions_history(api_client)
-    st.divider()
-    _render_transactions_history(api_client)
-
-
 def render_custom_dashboard(
     strategy_id: str,
     strategy_config: dict[str, Any],
     api_client: Any,
     session_state: dict[str, Any],
 ) -> None:
+    del strategy_id
+
     st.title(STRATEGY_TITLE)
+    _render_overview(strategy_config, session_state)
 
-    config = _build_dashboard_config(strategy_config)
-    prepared_state = prepare_ta_session_state(
-        api_client,
-        session_state=session_state,
-        config=config,
-    )
+    positions_tab, transactions_tab = st.tabs(["Positions", "Transactions"])
+    with positions_tab:
+        _render_positions(_positions_dataframe(api_client))
 
-    render_ta_dashboard(strategy_id, strategy_config, prepared_state, config)
-    _render_positions_and_transactions_history(api_client)
+    with transactions_tab:
+        tx_frame, truncated = _transactions_dataframe(api_client)
+        _render_transactions(tx_frame, truncated)
