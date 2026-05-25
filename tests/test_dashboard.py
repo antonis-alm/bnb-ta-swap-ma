@@ -52,6 +52,7 @@ def test_render_custom_dashboard_uses_ta_template_pipeline():
         patch("dashboard.ui.st.title") as mock_title,
         patch("dashboard.ui.prepare_ta_session_state", return_value=prepared_state) as mock_prepare,
         patch("dashboard.ui.render_ta_dashboard") as mock_render,
+        patch("dashboard.ui._render_positions_and_transactions_history") as mock_history,
     ):
         render_custom_dashboard("strat-1", strategy_config, api_client, session_state)
 
@@ -63,3 +64,4 @@ def test_render_custom_dashboard_uses_ta_template_pipeline():
     assert prepare_kwargs["config"].indicator_name == "EMA Crossover"
 
     mock_render.assert_called_once_with("strat-1", strategy_config, prepared_state, prepare_kwargs["config"])
+    mock_history.assert_called_once_with(api_client)
