@@ -3,7 +3,7 @@ name = "b_n_b_t_a_swap_m_a"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "almanak>=2.16.1rc1",
+    "almanak>=2.16.1rc4",
 ]
 
 [tool.almanak.run]
